@@ -1,0 +1,231 @@
+{
+  "_id": "v4Ffmpg001",
+  "name": "FFmpg (Optimized) (v4.3)",
+  "description": "",
+  "tags": [],
+  "flowPlugins": [
+    {
+      "name": "Input File",
+      "sourceRepo": "Community",
+      "pluginName": "inputFile",
+      "version": "1.0.0",
+      "inputsDB": {},
+      "id": "v4InputFil",
+      "position": {
+        "x": 396,
+        "y": -1404
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Extract SRT Sub",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "v4ExtSrt01",
+      "position": {
+        "x": 396,
+        "y": -1308
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "// Custom JS Function node: \"Extract SRT Sub\"\n// Position: Input File -> Copy to Working Directory -> Extract SRT Sub -> Begin Command\n// Runs after Copy to Working Directory so ffmpeg reads the local cache\n// copy (args.inputFileObj._id) instead of the source over the network\n// share -- faster on a slow NFS/SMB link. The sidecar still gets written\n// next to the real library file: the OUTPUT path is always derived from\n// args.originalLibraryFile._id, which stays stable regardless of node\n// position, so moving this node after the copy changes only where ffmpeg\n// reads from, not where the .srt ends up.\n//\n// Extracts the first eligible English subtitle stream to a <basename>.eng.srt\n// sidecar next to the source file. Pure side effect via its own ffmpeg\n// subprocess -- does not touch args.variables.ffmpegCommand, so it has zero\n// effect on the main transcode pipeline's pass count.\nmodule.exports = async (args) => {\n  const { execFile } = require('child_process');\n  const fs = require('fs');\n\n  const readPath = args.inputFileObj._id;\n  const libraryPath = args.originalLibraryFile._id;\n  const ffmpegPath = args.ffmpegPath || '/usr/bin/ffmpeg';\n\n  const streams = args.inputFileObj?.ffProbeData?.streams || [];\n  const engSubs = streams.filter((s) =>\n    s.codec_type === 'subtitle'\n    && s.tags?.language === 'eng'\n    && !['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'dvb_teletext', 'xsub'].includes(s.codec_name)\n    && !/commentary|description/i.test(s.tags?.title || ''));\n\n  if (engSubs.length === 0) {\n    args.jobLog('No eligible English subtitle track found.');\n    return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n  }\n\n  const chosen = engSubs.find((s) => !s.disposition?.hearing_impaired && !s.disposition?.forced) || engSubs[0];\n  const outPath = libraryPath.replace(/\\.[^/.]+$/, '') + '.eng.srt';\n\n  if (fs.existsSync(outPath)) {\n    args.jobLog('eng.srt already exists, skipping: ' + outPath);\n    return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n  }\n\n  await new Promise((resolve) => {\n    execFile(ffmpegPath, ['-y', '-i', readPath, '-map', `0:${chosen.index}`, outPath],\n      { maxBuffer: 1024 * 1024 * 20, timeout: 600000 }, (err, stdout, stderr) => {\n        if (err) {\n          args.jobLog('Subtitle extraction failed: ' + stderr);\n          try { fs.unlinkSync(outPath); } catch (e) { /* nothing to clean up */ }\n        } else {\n          args.jobLog('Extracted ' + outPath);\n        }\n        resolve();\n      });\n  });\n\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};\n"
+      }
+    },
+    {
+      "name": "Copy to Working Directory",
+      "sourceRepo": "Community",
+      "pluginName": "copyToWorkDirectory",
+      "version": "1.0.0",
+      "id": "v4CopyWD01",
+      "position": {
+        "x": 396,
+        "y": -1356
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Begin Command",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandStart",
+      "version": "1.0.0",
+      "id": "v4BeginCmd",
+      "position": {
+        "x": 396,
+        "y": -1250
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Select Streams",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "v4SelStrm1",
+      "position": {
+        "x": 396,
+        "y": -1200
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "// Custom JS Function node: \"Select Streams\"\n// Position: Begin Command -> Select Streams -> Plan Encoders\n// Consolidates: Remove Subtitles, Remove Data Streams, Keep Largest Video\n// Track, Clean Audio Streams (lang), Remove Commentary Tracks, Tag First\n// Audio Track (dedupe + fallback), Reorder Streams.\n//\n// One pass, flags only. Never writes a file; never clears a `removed` flag\n// except in the single, explicitly-logged zero-audio fallback. Must run\n// after the flow's ONE Begin Command and before Execute.\n//\n// Replaces the stock ffmpegCommandRemoveStreamByProperty nodes, whose\n// configured `tags:language` / `tags:title` (colon syntax) silently matches\n// nothing in current Tdarr (the plugin only supports dot syntax, verified\n// against plugin source and thousands of job reports with zero matching\n// per-stream log lines). Property access here is native JS, so that\n// failure mode no longer exists.\nmodule.exports = async (args) => {\n  const streams = args.variables.ffmpegCommand.streams;\n  const px = (s) => (s.width && s.height ? s.width * s.height : 0);\n  const why = new Map(); // stream -> removal reason, for the decision table\n  const mark = (s, reason) => {\n    if (!s.removed) { s.removed = true; why.set(s, reason); } // add-only: never resurrects\n  };\n  const BAD_TITLE = /commentary|description|sdh/i;\n\n  // --- 1. Subtitles (already sidecar'd by Extract SRT Sub) and data streams.\n  for (const s of streams) {\n    if (s.codec_type === 'subtitle') mark(s, 'subtitle');\n    else if (s.codec_type === 'data') mark(s, 'data stream');\n  }\n\n  // --- 2. Keep largest video-like stream (embedded cover-art defense).\n  // Begin Command relabels disposition.attached_pic streams as\n  // codec_type 'attachment', but ffmpeg still encodes them as video at\n  // Execute time (NVENC \"Frame dimensions\" crash, or \"Invalid argument\" on\n  // encoder open for zero-dimension attachments). A real 'video' stream\n  // always wins over an 'attachment' one, regardless of pixel count --\n  // embedded poster art (e.g. a 2000x3000 mjpeg) can easily out-pixel a\n  // real 1920x1080 movie, so pixel count alone is not a safe comparison\n  // across the two types. When a real video stream exists, every\n  // attachment is removed even if its width/height didn't probe (job\n  // ZTgdvBR6V: 14 mjpeg attachments with no probed dimensions all survived\n  // filtering and were force-encoded via the global -c:v, killing the\n  // whole ffmpeg process). Pixel count only breaks ties within the same\n  // type: multiple real video tracks, or (when no real video exists at\n  // all) multiple measured attachments. Font attachments carry no\n  // width/height and are never touched.\n  const realVideo = streams.filter((s) => s.codec_type === 'video' && px(s) > 0);\n  const attachments = streams.filter((s) => s.codec_type === 'attachment');\n  const measuredAttachments = attachments.filter((s) => px(s) > 0);\n  const measured = realVideo.length > 0 ? realVideo : measuredAttachments;\n  if (realVideo.length > 0) {\n    for (const s of attachments) {\n      const dims = s.width ? `${s.width}x${s.height}` : 'unmeasured';\n      mark(s, `cover art ${dims} (real video stream present)`);\n    }\n  }\n  if (measured.length > 1) {\n    let largest = measured[0];\n    for (const s of measured.slice(1)) {\n      if (px(s) > px(largest)) largest = s;\n    }\n    for (const s of measured) {\n      if (s !== largest) mark(s, `video ${s.width}x${s.height} < kept ${largest.width}x${largest.height}`);\n    }\n  }\n  // A video-typed stream (not attachment-typed) with missing width/height\n  // (broken probe) is deliberately neither compared nor removed -- it can\n  // only ever cause an extra copied stream, never the loss of the real\n  // movie.\n\n  // --- 3+4. Audio: language filter (keep eng/und; missing tag counts as\n  // und) and commentary/description/SDH title filter.\n  for (const s of streams) {\n    if (s.codec_type !== 'audio') continue;\n    const lang = String((s.tags && s.tags.language) || 'und').toLowerCase();\n    if (!lang.includes('eng') && !lang.includes('und')) mark(s, `language \"${lang}\"`);\n    const title = (s.tags && s.tags.title) || '';\n    if (BAD_TITLE.test(title)) mark(s, `title \"${title}\"`);\n  }\n\n  // --- 5. Dedupe to exactly one audio track, with tiered zero-survivor\n  // fallback. This block is the only place in the entire flow allowed to\n  // clear a `removed` flag.\n  const audio = streams.filter((s) => s.codec_type === 'audio');\n  let survivor = audio.find((s) => !s.removed);\n  if (!survivor && audio.length > 0) {\n    // Nothing survived filtering. Prefer any non-commentary track in any\n    // language over a commentary track.\n    survivor = audio.find((s) => !BAD_TITLE.test((s.tags && s.tags.title) || '')) || audio[0];\n    survivor.removed = false;\n    why.delete(survivor);\n    args.jobLog(`FALLBACK: no eng/und audio survived filtering; keeping stream #${survivor.index} (${survivor.codec_name}) instead of shipping silent output.`);\n  }\n  for (const s of audio) {\n    if (survivor && s !== survivor) mark(s, 'duplicate audio (one survivor kept)');\n  }\n\n  // --- 6. Reorder: video, then audio, then everything else. Execute maps\n  // output streams in array order, so a stable sort here is equivalent to\n  // the stock Reorder Streams node.\n  const rank = (s) => (s.codec_type === 'video' ? 0 : s.codec_type === 'audio' ? 1 : 2);\n  streams.sort((a, b) => rank(a) - rank(b)); // Array.sort is stable in Node >= 12\n\n  // --- 7. Decision table: the single job-report artifact that replaces\n  // seven nodes' worth of breadcrumbs. Read this before the dispatched\n  // ffmpeg command when debugging.\n  args.jobLog('--- Select Streams decision table ---');\n  for (const s of streams) {\n    const dims = s.width ? ` ${s.width}x${s.height}` : '';\n    const lang = (s.tags && s.tags.language) || '-';\n    const title = (s.tags && s.tags.title) || '';\n    const verdict = s.removed ? `REMOVE (${why.get(s) || 'upstream'})` : 'KEEP';\n    args.jobLog(`#${s.index} ${s.codec_type}/${s.codec_name}${dims} lang=${lang} title=\"${title}\" -> ${verdict}`);\n  }\n\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};\n"
+      }
+    },
+    {
+      "name": "Plan Encoders",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "v4PlanEnc1",
+      "position": {
+        "x": 396,
+        "y": -1152
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "// Custom JS Function node: \"Plan Encoders\"\n// Position: Select Streams -> Plan Encoders -> Set MKV Container -> Execute\n// Consolidates: Check if Video is HEVC, NVENC Turbo Encoder, Check if audio\n// is EAC3, Encode AC3 -- and all four branch combinations, with no branches.\n//\n// Judges the SURVIVING streams (post-filter, post-dedupe, post-fallback),\n// fixing two stock-plugin bugs at once: stock checkAudioCodec and stock\n// checkVideoCodec both match ANY stream in the raw probe, not the stream\n// that actually ships.\n//\n// Args are pushed as pre-tokenized array elements onto\n// overallOuputArguments (Tdarr's own field name), so custom-args fields'\n// \"no shell quoting\" trap is structurally impossible here. Global -c:v/-c:a\n// semantics are safe because Select Streams guarantees at most one\n// surviving video and one surviving audio stream.\nmodule.exports = async (args) => {\n  const cmd = args.variables.ffmpegCommand;\n  const out = cmd.overallOuputArguments;\n  const inp = cmd.overallInputArguments;\n  const survivors = cmd.streams.filter((s) => !s.removed);\n\n  // Alternate CPU (libx265) encoder profiles, not currently wired in.\n  // Each is a drop-in replacement for the VIDEO_ARGS declaration below,\n  // to trade NVENC speed for CPU-encode efficiency.\n  //\n  // Movie Baseline:\n  //   const VIDEO_ARGS = ['-c:v', 'libx265', '-pix_fmt', 'yuv420p10le', '-preset', 'medium', '-crf', '25',\n  //     '-x265-params', 'colorprim=bt709:transfer=bt709:colormatrix=bt709'];\n  //\n  // Max Savings:\n  //   const VIDEO_ARGS = ['-c:v', 'libx265', '-pix_fmt', 'yuv420p10le', '-preset', 'slow', '-crf', '27',\n  //     '-x265-params', 'colorprim=bt709:transfer=bt709:colormatrix=bt709'];\n  //\n  // TV:\n  //   const VIDEO_ARGS = ['-c:v', 'libx265', '-pix_fmt', 'yuv420p10le', '-preset', 'medium', '-crf', '25',\n  //     '-x265-params', 'colorprim=bt709:transfer=bt709:colormatrix=bt709:aq-mode=2:aq-strength=0.8:psy-rd=1.0'];\n  //\n  // Validated \"Turbo\" profile (VMAF-swept). Alternate encoder profiles for\n  // experiments live in the README.\n  const VIDEO_ARGS = ['-c:v', 'hevc_nvenc', '-pix_fmt', 'p010le', '-preset', 'p4',\n    '-rc', 'vbr', '-cq', '31', '-temporal-aq', '1', '-multipass', 'qres', '-bf', '4'];\n\n  // Video: judge the survivor, not the whole probe. codec_type may be\n  // 'attachment' if the only video-like stream was an un-competed cover art\n  // image -- that is a broken source for a movie library, so fail loudly\n  // here instead of letting NVENC crash with \"Frame dimensions are less\n  // than the minimum supported value\".\n  const video = survivors.find((s) => s.codec_type === 'video')\n    || survivors.find((s) => s.codec_type === 'attachment' && s.width && s.height);\n  if (!video) throw new Error('Plan Encoders: no surviving video stream after Select Streams.');\n  const isImage = ['mjpeg', 'png', 'bmp', 'gif'].includes(video.codec_name)\n    || String(video.codec_long_name || '').includes('image');\n  if (video.codec_name === 'hevc') {\n    args.jobLog(`video #${video.index} already hevc -> stream copy`);\n  } else if (isImage) {\n    throw new Error(`Plan Encoders: only video-like survivor #${video.index} is ${video.codec_name} cover art (${video.width}x${video.height}); no real movie stream in source.`);\n  } else {\n    // Hardware decode the source too, not just encode. -hwaccel cuda\n    // auto-picks the matching CUVID decoder (h264_cuvid, hevc_cuvid,\n    // av1_cuvid, etc.) for whatever the input actually is, so this one\n    // flag covers every codec without per-source branching. Only added\n    // when a real re-encode is happening -- a stream-copy job never\n    // decodes the video, so hwaccel would be a no-op there anyway.\n    //\n    // Deliberately NOT adding -hwaccel_output_format cuda. That keeps\n    // decoded frames as GPU-resident CUDA surfaces, but VIDEO_ARGS\n    // requests -pix_fmt p010le as a plain output option -- converting a\n    // CUDA surface to p010le needs an explicit scale_cuda/hwdownload\n    // filter, not a bare -pix_fmt, and ffmpeg's auto filter-graph\n    // negotiation breaks on that mismatch (\"Error reinitializing\n    // filters!\", confirmed in production on job HxtrklhRCZ). Plain\n    // -hwaccel cuda still gets NVDEC hardware decode; frames just come\n    // back to system memory afterward, so the existing p010le path is\n    // unaffected.\n    inp.push('-hwaccel', 'cuda');\n    out.push(...VIDEO_ARGS);\n    args.jobLog(`video #${video.index} ${video.codec_name} -> hevc_nvenc (Turbo p4/cq31), hw decode via cuda`);\n  }\n\n  // Audio: judge the one survivor Select Streams guarantees. Channel count\n  // only ever goes down, never up: a 2.0 source stays 2.0, and only a\n  // source above 5.1 (7.1 = 8ch) gets downmixed to 5.1. Forcing everything\n  // to 5.1/384k used to synthesize channels that were never in the source\n  // (job IoZG9j9G0: 192k stereo AC3 -> 384k 5.1 EAC3, +7.9% file size for\n  // four channels ffmpeg had to invent).\n  const audio = survivors.find((s) => s.codec_type === 'audio');\n  if (audio) {\n    const srcChannels = audio.channels || 6;\n    if (audio.codec_name === 'eac3' && srcChannels <= 6) {\n      args.jobLog(`audio #${audio.index} already eac3, ${srcChannels}ch -> stream copy (Atmos-in-EAC3 metadata preserved)`);\n    } else if (srcChannels > 6) {\n      out.push('-af', 'aformat=channel_layouts=5.1', '-c:a', 'eac3', '-b:a', '384k');\n      args.jobLog(`audio #${audio.index} ${audio.codec_name} ${srcChannels}ch -> eac3 5.1 384k (downmixed)`);\n    } else {\n      const bitrate = srcChannels <= 2 ? '192k' : '384k';\n      out.push('-c:a', 'eac3', '-b:a', bitrate);\n      args.jobLog(`audio #${audio.index} ${audio.codec_name} ${srcChannels}ch -> eac3 ${srcChannels}ch ${bitrate} (channel count preserved)`);\n    }\n  } else {\n    args.jobLog('no audio stream in source; video-only output.');\n  }\n\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};\n"
+      }
+    },
+    {
+      "name": "Set MKV Container",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandSetContainer",
+      "version": "1.0.0",
+      "id": "v4SetMkv01",
+      "position": {
+        "x": 396,
+        "y": -1100
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "forceConform": "true"
+      }
+    },
+    {
+      "name": "Execute: Encoding",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandExecute",
+      "version": "1.0.0",
+      "id": "v4Execute1",
+      "position": {
+        "x": 396,
+        "y": -1050
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Replace Original File",
+      "sourceRepo": "Community",
+      "pluginName": "replaceOriginalFile",
+      "version": "1.0.0",
+      "inputsDB": {},
+      "id": "v4ReplOrg1",
+      "position": {
+        "x": 396,
+        "y": -1000
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Notify Plex",
+      "sourceRepo": "Community",
+      "pluginName": "runClassicTranscodePlugin",
+      "version": "1.0.0",
+      "id": "v4NotifyPx",
+      "position": {
+        "x": 396,
+        "y": -950
+      },
+      "inputsDB": {
+        "pluginSourceId": "Community:Tdarr_Plugin_TD01_TOAD_Autoscan",
+        "autoscan_username": "your-username",
+        "autoscan_address": "http://your-autoscan-host"
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "See commnts in Plan Encoders to change ffmpeg encoding settings.  CPU Baseline, Max Savings, TV, and NVENC (default) are already included.",
+      "sourceRepo": "Community",
+      "pluginName": "comment",
+      "version": "1.0.0",
+      "id": "sraSYl94v",
+      "position": {
+        "x": 588,
+        "y": -1152
+      },
+      "fpEnabled": true
+    }
+  ],
+  "flowEdges": [
+    {
+      "source": "v4BeginCmd",
+      "sourceHandle": "1",
+      "target": "v4SelStrm1",
+      "targetHandle": null,
+      "id": "v4e4"
+    },
+    {
+      "source": "v4SelStrm1",
+      "sourceHandle": "1",
+      "target": "v4PlanEnc1",
+      "targetHandle": null,
+      "id": "v4e5"
+    },
+    {
+      "source": "v4PlanEnc1",
+      "sourceHandle": "1",
+      "target": "v4SetMkv01",
+      "targetHandle": null,
+      "id": "v4e6"
+    },
+    {
+      "source": "v4SetMkv01",
+      "sourceHandle": "1",
+      "target": "v4Execute1",
+      "targetHandle": null,
+      "id": "v4e7"
+    },
+    {
+      "source": "v4Execute1",
+      "sourceHandle": "1",
+      "target": "v4ReplOrg1",
+      "targetHandle": null,
+      "id": "v4e8"
+    },
+    {
+      "source": "v4ReplOrg1",
+      "sourceHandle": "1",
+      "target": "v4NotifyPx",
+      "targetHandle": null,
+      "id": "v4e9"
+    },
+    {
+      "source": "v4InputFil",
+      "sourceHandle": "1",
+      "target": "v4CopyWD01",
+      "targetHandle": null,
+      "id": "v4e1_r"
+    },
+    {
+      "source": "v4CopyWD01",
+      "sourceHandle": "1",
+      "target": "v4ExtSrt01",
+      "targetHandle": null,
+      "id": "v4e2_r"
+    },
+    {
+      "source": "v4ExtSrt01",
+      "sourceHandle": "1",
+      "target": "v4BeginCmd",
+      "targetHandle": null,
+      "id": "v4e3_r"
+    },
+    {
+      "source": "sraSYl94v",
+      "sourceHandle": "1",
+      "target": "v4PlanEnc1",
+      "targetHandle": null,
+      "id": "pqBSmgdZR"
+    }
+  ]
+}

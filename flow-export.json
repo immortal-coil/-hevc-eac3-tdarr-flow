@@ -1,0 +1,544 @@
+{
+  "_id": "kLrgVidT2",
+  "name": "FFmpg (Optimized) (v3)",
+  "priority": 0,
+  "flowPlugins": [
+    {
+      "name": "Check if audio is EAC3",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "C3r1inmJF",
+      "position": {
+        "x": 108,
+        "y": -588
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "module.exports = async (args) => {\n  const streams = args.variables.ffmpegCommand.streams;\n  const survivor = streams.find((s) => s.codec_type === 'audio' && !s.removed);\n  const isEac3 = !!survivor && survivor.codec_name === 'eac3';\n  return { outputFileObj: args.inputFileObj, outputNumber: isEac3 ? 1 : 2, variables: args.variables };\n};"
+      }
+    },
+    {
+      "name": "CPU Encoderr TV",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "id": "nVzcrzkjr",
+      "position": {
+        "x": 636,
+        "y": -528
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "inputArguments": "",
+        "outputArguments": "-c:v libx265 -pix_fmt yuv420p10le -preset medium -crf 25 -x265-params \"colorprim=bt709:transfer=bt709:colormatrix=bt709:aq-mode=2:aq-strength=0.8:psy-rd=1.0\""
+      }
+    },
+    {
+      "name": "CPU Encoder Max Savings",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "id": "M8-WaEKPR",
+      "position": {
+        "x": 636,
+        "y": -612
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "inputArguments": "",
+        "outputArguments": "-c:v libx265 -pix_fmt yuv420p10le -preset slow -crf 27 -x265-params \"colorprim=bt709:transfer=bt709:colormatrix=bt709\""
+      }
+    },
+    {
+      "name": "CPU Encoder: Movies Baseline",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "id": "eacZwPR3H",
+      "position": {
+        "x": 636,
+        "y": -696
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "inputArguments": "",
+        "outputArguments": "-c:v libx265 -pix_fmt yuv420p10le -preset medium -crf 25 -x265-params \"colorprim=bt709:transfer=bt709:colormatrix=bt709\""
+      }
+    },
+    {
+      "name": "Remove Commentary Tracks",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRemoveStreamByProperty",
+      "version": "1.0.0",
+      "id": "r1b1FIk9M",
+      "position": {
+        "x": 396,
+        "y": -1128
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "codecType": "audio",
+        "propertyToCheck": "tags:title",
+        "valuesToRemove": "commentary,description,sdh",
+        "condition": "includes"
+      }
+    },
+    {
+      "name": "Encode  AC3",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "id": "W-FoypumF",
+      "position": {
+        "x": 288,
+        "y": -444
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "inputArguments": "",
+        "outputArguments": " -af aformat=channel_layouts=5.1 -c:a eac3 -b:a 384k"
+      }
+    },
+    {
+      "name": "Notify Plex",
+      "sourceRepo": "Community",
+      "pluginName": "runClassicTranscodePlugin",
+      "version": "1.0.0",
+      "id": "OdCvrzCVG",
+      "position": {
+        "x": 60,
+        "y": -84
+      },
+      "inputsDB": {
+        "pluginSourceId": "Community:Tdarr_Plugin_TD01_TOAD_Autoscan",
+        "autoscan_username": "your-username",
+        "autoscan_address": "http://your-autoscan-host"
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Input File",
+      "sourceRepo": "Community",
+      "pluginName": "inputFile",
+      "version": "1.0.0",
+      "inputsDB": {},
+      "id": "tmNkXP0BFb",
+      "position": {
+        "x": 396,
+        "y": -1644
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Replace Original File",
+      "sourceRepo": "Community",
+      "pluginName": "replaceOriginalFile",
+      "version": "1.0.0",
+      "inputsDB": {},
+      "id": "aQWq_myAi",
+      "position": {
+        "x": 60,
+        "y": -144
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Check if Video is HEVC",
+      "sourceRepo": "Community",
+      "pluginName": "checkVideoCodec",
+      "version": "1.0.0",
+      "id": "S_7mcuzfm",
+      "position": {
+        "x": 396,
+        "y": -864
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Execute: Encoding",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandExecute",
+      "version": "1.0.0",
+      "id": "bbZnmwP-p",
+      "position": {
+        "x": 60,
+        "y": -240
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "NVENC Turbo Encoder: HEVC P4/CQ31",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandCustomArguments",
+      "version": "1.0.0",
+      "id": "gF4Uv9ZPx",
+      "position": {
+        "x": 420,
+        "y": -684
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "inputArguments": "",
+        "outputArguments": "-c:v hevc_nvenc -pix_fmt p010le -preset p4 -rc vbr -cq 31 -temporal-aq 1 -multipass qres -bf 4"
+      }
+    },
+    {
+      "name": "Begin Command",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandStart",
+      "version": "1.0.0",
+      "id": "84SZf02a-",
+      "position": {
+        "x": 396,
+        "y": -1416
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Remove Subtitles",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRemoveSubtitles",
+      "version": "1.0.0",
+      "id": "P7lNk4gRE",
+      "position": {
+        "x": 396,
+        "y": -1344
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Set MKV Container",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandSetContainer",
+      "version": "1.0.0",
+      "id": "KqaHQ2CRE",
+      "position": {
+        "x": 60,
+        "y": -312
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "forceConform": "true"
+      }
+    },
+    {
+      "name": "Remove Data Streams",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRemoveDataStreams",
+      "version": "1.0.0",
+      "id": "eyVMXVc4e",
+      "position": {
+        "x": 396,
+        "y": -1272
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Tag first audio track",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "zgGVFAK4A",
+      "position": {
+        "x": 396,
+        "y": -1044
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "module.exports = async (args) => {\n  const streams = args.variables.ffmpegCommand.streams;\n  let keptAudio = false;\n  for (const s of streams) {\n    if (s.codec_type !== 'audio' || s.removed) continue;\n    if (keptAudio) { s.removed = true; }\n    else { keptAudio = true; }\n  }\n  if (!keptAudio) {\n    const first = streams.find((s) => s.codec_type === 'audio');\n    if (first) {\n      first.removed = false;\n      args.jobLog('No eng/und audio survived filtering; keeping first audio track as fallback.');\n    }\n  }\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};"
+      }
+    },
+    {
+      "name": "Clean Audio Streams",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRemoveStreamByProperty",
+      "version": "1.0.0",
+      "id": "F-SXrfL1L",
+      "position": {
+        "x": 396,
+        "y": -1200
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "codecType": "audio",
+        "propertyToCheck": "tags:language",
+        "valuesToRemove": "eng,und",
+        "condition": "not_includes"
+      }
+    },
+    {
+      "name": "Reorder Streams",
+      "sourceRepo": "Community",
+      "pluginName": "ffmpegCommandRorderStreams",
+      "version": "1.0.0",
+      "id": "jcKbKE4SE",
+      "position": {
+        "x": 396,
+        "y": -948
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Copy to Working Directory",
+      "sourceRepo": "Community",
+      "pluginName": "copyToWorkDirectory",
+      "version": "1.0.0",
+      "id": "_IOhWRDQo",
+      "position": {
+        "x": 396,
+        "y": -1500
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Extract SRT Sub",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "nSbrK96uI",
+      "position": {
+        "x": 444,
+        "y": -1572
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "// Custom JS Function node: \"Extract SRT Sub\"\n// Position: Input File -> Copy to Working Directory -> Extract SRT Sub -> Begin Command\n// Runs after Copy to Working Directory so ffmpeg reads the local cache\n// copy (args.inputFileObj._id) instead of the source over the network\n// share -- faster on a slow NFS/SMB link. The sidecar still gets written\n// next to the real library file: the OUTPUT path is always derived from\n// args.originalLibraryFile._id, which stays stable regardless of node\n// position, so moving this node after the copy changes only where ffmpeg\n// reads from, not where the .srt ends up.\n//\n// Extracts the first eligible English subtitle stream to a <basename>.eng.srt\n// sidecar next to the source file. Pure side effect via its own ffmpeg\n// subprocess -- does not touch args.variables.ffmpegCommand, so it has zero\n// effect on the main transcode pipeline's pass count.\nmodule.exports = async (args) => {\n  const { execFile } = require('child_process');\n  const fs = require('fs');\n\n  const readPath = args.inputFileObj._id;\n  const libraryPath = args.originalLibraryFile._id;\n  const ffmpegPath = args.ffmpegPath || '/usr/bin/ffmpeg';\n\n  const streams = args.inputFileObj?.ffProbeData?.streams || [];\n  const engSubs = streams.filter((s) =>\n    s.codec_type === 'subtitle'\n    && s.tags?.language === 'eng'\n    && !['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'dvb_teletext', 'xsub'].includes(s.codec_name)\n    && !/commentary|description/i.test(s.tags?.title || ''));\n\n  if (engSubs.length === 0) {\n    args.jobLog('No eligible English subtitle track found.');\n    return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n  }\n\n  const chosen = engSubs.find((s) => !s.disposition?.hearing_impaired && !s.disposition?.forced) || engSubs[0];\n  const outPath = libraryPath.replace(/\\.[^/.]+$/, '') + '.eng.srt';\n\n  if (fs.existsSync(outPath)) {\n    args.jobLog('eng.srt already exists, skipping: ' + outPath);\n    return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n  }\n\n  await new Promise((resolve) => {\n    execFile(ffmpegPath, ['-y', '-i', readPath, '-map', `0:${chosen.index}`, outPath],\n      { maxBuffer: 1024 * 1024 * 20, timeout: 600000 }, (err, stdout, stderr) => {\n        if (err) {\n          args.jobLog('Subtitle extraction failed: ' + stderr);\n          try { fs.unlinkSync(outPath); } catch (e) { /* nothing to clean up */ }\n        } else {\n          args.jobLog('Extracted ' + outPath);\n        }\n        resolve();\n      });\n  });\n\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};\n"
+      }
+    },
+    {
+      "name": "Replace the video encoder settings with prefered settings below",
+      "sourceRepo": "Community",
+      "pluginName": "comment",
+      "version": "1.0.0",
+      "id": "Te53TgAGc",
+      "position": {
+        "x": 636,
+        "y": -804
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Remove SRT extraction if not needed.  \nSaves to original file location",
+      "sourceRepo": "Community",
+      "pluginName": "comment",
+      "version": "1.0.0",
+      "id": "aml4Z3XBR",
+      "position": {
+        "x": 648,
+        "y": -1632
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Skips re-encode if source is already HEVC",
+      "sourceRepo": "Community",
+      "pluginName": "comment",
+      "version": "1.0.0",
+      "id": "YyNj_1M0e",
+      "position": {
+        "x": 228,
+        "y": -900
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Tags first English Audio track so only one track per file.",
+      "sourceRepo": "Community",
+      "pluginName": "comment",
+      "version": "1.0.0",
+      "id": "N6vlOyZd5",
+      "position": {
+        "x": 636,
+        "y": -1092
+      },
+      "fpEnabled": true
+    },
+    {
+      "name": "Keep largest video track",
+      "sourceRepo": "Community",
+      "pluginName": "customFunction",
+      "version": "1.0.0",
+      "id": "aP4xVcR9z",
+      "position": {
+        "x": 396,
+        "y": -1236
+      },
+      "fpEnabled": true,
+      "inputsDB": {
+        "code": "// Custom JS Function node: \"Keep largest video track\"\n// Position: after Remove Data Streams, before Clean Audio Streams\n// (same slot as the stock per-property removal nodes; must run after\n// Begin Command and before the single final Execute).\n//\n// Keeps the real video stream and marks every embedded cover-art\n// \"attachment\" stream (mjpeg posters/thumbnails, reported by Tdarr as\n// codec_type: \"attachment\" rather than \"video\") removed. A real\n// codec_type: \"video\" stream always wins over an \"attachment\" one,\n// regardless of pixel count -- embedded poster art can be higher\n// resolution than the actual movie (e.g. a 2000x3000 mjpeg cover next to\n// a 1920x1080 source), so pixel count alone is not a safe comparison\n// across the two types. Pixel count only breaks ties within the same\n// type: multiple real video tracks, or (when no real video exists at\n// all) multiple attachments.\nmodule.exports = async (args) => {\n  const streams = args.variables.ffmpegCommand.streams;\n  const pixelCount = (s) => (s.width && s.height) ? s.width * s.height : 0;\n\n  const realVideo = streams.filter((s) => s.codec_type === 'video' && pixelCount(s) > 0);\n  const attachments = streams.filter((s) => s.codec_type === 'attachment' && pixelCount(s) > 0);\n  // Font attachments carry no width/height and are excluded by the\n  // pixelCount(s) > 0 checks above, so they're never touched.\n  const videoStreams = realVideo.length > 0 ? realVideo : attachments;\n\n  if (realVideo.length > 0) {\n    for (const s of attachments) { s.removed = true; }\n  }\n\n  if (videoStreams.length > 1) {\n    let largest = videoStreams[0];\n    for (const s of videoStreams.slice(1)) {\n      if (pixelCount(s) > pixelCount(largest)) largest = s;\n    }\n    const smaller = videoStreams.filter((s) => s !== largest);\n    // Only ever add removals, never clear one a prior node already set.\n    for (const s of smaller) { s.removed = true; }\n    args.jobLog(`Kept video stream ${largest.index} (${largest.width}x${largest.height}), removed ${smaller.length} smaller video stream(s).`);\n  } else if (attachments.length > 0 && realVideo.length > 0) {\n    args.jobLog(`Kept real video stream, removed ${attachments.length} cover-art attachment stream(s).`);\n  }\n\n  return { outputFileObj: args.inputFileObj, outputNumber: 1, variables: args.variables };\n};\n"
+      }
+    }
+  ],
+  "flowEdges": [
+    {
+      "source": "aQWq_myAi",
+      "sourceHandle": "1",
+      "target": "OdCvrzCVG",
+      "targetHandle": null,
+      "id": "7N8wLjdAX"
+    },
+    {
+      "source": "bbZnmwP-p",
+      "sourceHandle": "1",
+      "target": "aQWq_myAi",
+      "targetHandle": null,
+      "id": "9N8FCPpS9"
+    },
+    {
+      "source": "P7lNk4gRE",
+      "sourceHandle": "1",
+      "target": "eyVMXVc4e",
+      "targetHandle": null,
+      "id": "sCNss9h-2"
+    },
+    {
+      "source": "F-SXrfL1L",
+      "sourceHandle": "1",
+      "target": "r1b1FIk9M",
+      "targetHandle": null,
+      "id": "26vJoVSax"
+    },
+    {
+      "source": "r1b1FIk9M",
+      "sourceHandle": "1",
+      "target": "zgGVFAK4A",
+      "targetHandle": null,
+      "id": "GkUZjDJH1"
+    },
+    {
+      "source": "zgGVFAK4A",
+      "sourceHandle": "1",
+      "target": "jcKbKE4SE",
+      "targetHandle": null,
+      "id": "jfCyu7x2O"
+    },
+    {
+      "source": "jcKbKE4SE",
+      "sourceHandle": "1",
+      "target": "S_7mcuzfm",
+      "targetHandle": null,
+      "id": "g-Z03rXZ1"
+    },
+    {
+      "source": "N6vlOyZd5",
+      "sourceHandle": "1",
+      "target": "zgGVFAK4A",
+      "targetHandle": null,
+      "id": "t9ZY3d_J3"
+    },
+    {
+      "source": "YyNj_1M0e",
+      "sourceHandle": "1",
+      "target": "S_7mcuzfm",
+      "targetHandle": null,
+      "id": "EOyZICgeW"
+    },
+    {
+      "source": "Te53TgAGc",
+      "sourceHandle": "1",
+      "target": "gF4Uv9ZPx",
+      "targetHandle": null,
+      "id": "Le8dzbD2I"
+    },
+    {
+      "source": "gF4Uv9ZPx",
+      "sourceHandle": "1",
+      "target": "C3r1inmJF",
+      "targetHandle": null,
+      "id": "HqU3g2pcY"
+    },
+    {
+      "source": "S_7mcuzfm",
+      "sourceHandle": "1",
+      "target": "C3r1inmJF",
+      "targetHandle": null,
+      "id": "B-OE2VkA7"
+    },
+    {
+      "source": "C3r1inmJF",
+      "sourceHandle": "2",
+      "target": "W-FoypumF",
+      "targetHandle": null,
+      "id": "oiHVz8naz"
+    },
+    {
+      "source": "aml4Z3XBR",
+      "sourceHandle": "1",
+      "target": "nSbrK96uI",
+      "targetHandle": null,
+      "id": "FVlO_69kd"
+    },
+    {
+      "source": "84SZf02a-",
+      "sourceHandle": "1",
+      "target": "P7lNk4gRE",
+      "targetHandle": null,
+      "id": "kLWXACMFy"
+    },
+    {
+      "source": "C3r1inmJF",
+      "sourceHandle": "1",
+      "target": "KqaHQ2CRE",
+      "targetHandle": null,
+      "id": "9qVAW35mw"
+    },
+    {
+      "source": "KqaHQ2CRE",
+      "sourceHandle": "1",
+      "target": "bbZnmwP-p",
+      "targetHandle": null,
+      "id": "KEtqN0upS"
+    },
+    {
+      "source": "W-FoypumF",
+      "sourceHandle": "1",
+      "target": "KqaHQ2CRE",
+      "targetHandle": null,
+      "id": "w0wi-gv7o"
+    },
+    {
+      "source": "S_7mcuzfm",
+      "sourceHandle": "2",
+      "target": "gF4Uv9ZPx",
+      "targetHandle": null,
+      "id": "jy_Ur3ocR"
+    },
+    {
+      "source": "eyVMXVc4e",
+      "sourceHandle": "1",
+      "target": "aP4xVcR9z",
+      "targetHandle": null,
+      "id": "e_rmpic_in"
+    },
+    {
+      "source": "aP4xVcR9z",
+      "sourceHandle": "1",
+      "target": "F-SXrfL1L",
+      "targetHandle": null,
+      "id": "e_rmpic_out"
+    },
+    {
+      "source": "tmNkXP0BFb",
+      "sourceHandle": "1",
+      "target": "_IOhWRDQo",
+      "targetHandle": null,
+      "id": "UuDymBkW4_r"
+    },
+    {
+      "source": "_IOhWRDQo",
+      "sourceHandle": "1",
+      "target": "nSbrK96uI",
+      "targetHandle": null,
+      "id": "p1GKdGE8E_r"
+    },
+    {
+      "source": "nSbrK96uI",
+      "sourceHandle": "1",
+      "target": "84SZf02a-",
+      "targetHandle": null,
+      "id": "wg184DPnC_r"
+    }
+  ],
+  "description": ""
+}
